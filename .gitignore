@@ -1,0 +1,5 @@
+.venv
+.vscode
+data/*.pkl
+data/*.json
+data/*.csv
