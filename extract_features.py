@@ -182,28 +182,30 @@ def process_trajectory(data, points):
     res["frac_stop"] = np.sum(t_deltas[vel[1:] <= VEL_THRESHOLD]) / res["delta_t"]
     res["frac_accel"] = np.sum(t_deltas[acc_dir > ACC_THRESHOLD]) / res["delta_t"]
     res["frac_break"] = np.sum(t_deltas[acc_dir < -ACC_THRESHOLD]) / res["delta_t"]
-    t_x, t_y = timestamp_encoding(t, x, y, points)
+    p_x, p_y = path_encoding(
+        np.concatenate((np.array([0.0]), np.cumsum(path_deltas))), x, y, points
+    )
     for i in range(points):
-        res[f"x_{i}"] = t_x[i] - x[0]
-        res[f"y_{i}"] = t_y[i] - y[0]
+        res[f"x_{i}"] = p_x[i] - x[0]
+        res[f"y_{i}"] = p_y[i] - y[0]
     return res
 
 
-def timestamp_encoding(t, x, y, n):
+def path_encoding(path, x, y, n):
     j = 0
-    t_x = []
-    t_y = []
+    p_x = []
+    p_y = []
     for i in range(n):
-        target = t[0] + i * (t[-1] - t[0]) / (n - 1)
-        j = j + np.argmax(t[j:] >= target)
+        target = path[0] + i * (path[-1] - path[0]) / (n - 1)
+        j = j + np.argmax(path[j:] >= target)
         if j == 0:
-            t_x.append(x[0])
-            t_y.append(y[0])
+            p_x.append(x[0])
+            p_y.append(y[0])
         else:
-            coeff = (target - t[j - 1]) / (t[j] - t[j - 1])
-            t_x.append(x[j - 1] * (1 - coeff) + x[j] * coeff)
-            t_y.append(y[j - 1] * (1 - coeff) + y[j] * coeff)
-    return t_x, t_y
+            coeff = (target - path[j - 1]) / (path[j] - path[j - 1])
+            p_x.append(x[j - 1] * (1 - coeff) + x[j] * coeff)
+            p_y.append(y[j - 1] * (1 - coeff) + y[j] * coeff)
+    return p_x, p_y
 
 
 def main():
