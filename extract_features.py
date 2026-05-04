@@ -5,9 +5,11 @@ import argparse
 from tqdm import tqdm
 
 
-def extract_window_features(input_path, output_path, window, stride):
+def extract_window_features(input_path, output_path, window, stride, i24=False):
     with open(input_path, "rb") as f:
         raw_data = json.load(f)
+    if i24:
+        raise ValueError("i24 format is only supported for trajectory features")
     fields = [
         ("object_id", False, "int64"),
         ("intersection_id", False, "int64"),
@@ -103,9 +105,10 @@ def extract_window_features(input_path, output_path, window, stride):
     df.to_csv(output_path, index=False)
 
 
-def extract_trajectory_features(input_path, output_path, points):
+def extract_trajectory_features(input_path, output_path, points, i24=False):
     with open(input_path, "rb") as f:
         raw_data = json.load(f)
+    raw_data = preprocess_records(raw_data, i24)
     preserved_fields = [
         "object_id",
         "intersection_id",
@@ -115,10 +118,18 @@ def extract_trajectory_features(input_path, output_path, points):
         "obj_width",
         "obj_height",
     ]
+    time_series_fields = {"ts", "obj_x", "obj_y", "vel_x", "vel_y", "heading"}
     res = []
     for obj in tqdm(raw_data):
         data = process_trajectory(obj, points)
-        data |= {field: obj[field] for field in preserved_fields}
+        scalar_fields = {
+            key: value
+            for key, value in obj.items()
+            if key not in time_series_fields
+            and not isinstance(value, (list, tuple, np.ndarray, dict))
+        }
+        data |= {field: obj[field] for field in preserved_fields if field in obj}
+        data |= {key: value for key, value in scalar_fields.items() if key not in data}
         res.append(data)
     df = pd.DataFrame(res)
     df.to_csv(output_path, index=False)
@@ -208,6 +219,51 @@ def path_encoding(path, x, y, n):
     return p_x, p_y
 
 
+def preprocess_records(raw_data, i24):
+    if not i24:
+        return raw_data
+    processed = []
+    for obj in raw_data:
+        obj_id = obj.get("_id")
+        if isinstance(obj_id, dict):
+            obj_id = obj_id.get("$oid")
+        ts = np.array(obj["timestamp"], dtype=float)
+        obj_x = np.array(obj["x_position"], dtype=float)
+        obj_y = np.array(obj["y_position"], dtype=float)
+        vel_x = np.gradient(obj_x, ts)
+        vel_y = np.gradient(obj_y, ts)
+        normalized = {
+            "object_id": obj_id,
+            "intersection_id": -1,
+            "classification": str(obj.get("coarse_vehicle_class", "")),
+            "sub_classification": str(obj.get("fine_vehicle_class", "")),
+            "obj_length": obj.get("length"),
+            "obj_width": obj.get("width"),
+            "obj_height": obj.get("height"),
+            "ts": ts.tolist(),
+            "obj_x": obj_x.tolist(),
+            "obj_y": obj_y.tolist(),
+            "vel_x": vel_x.tolist(),
+            "vel_y": vel_y.tolist(),
+        }
+        for key, value in obj.items():
+            if key in {
+                "_id",
+                "timestamp",
+                "x_position",
+                "y_position",
+                "length",
+                "width",
+                "height",
+                "coarse_vehicle_class",
+                "fine_vehicle_class",
+            }:
+                continue
+            normalized[key] = value
+        processed.append(normalized)
+    return processed
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input_path")
@@ -216,14 +272,17 @@ def main():
     parser.add_argument("--window", "-w", type=int, default=20)
     parser.add_argument("--stride", "-s", type=int, default=10)
     parser.add_argument("--points", "-p", type=int, default=0)
+    parser.add_argument("--i24", action="store_true")
 
     args = parser.parse_args()
     if args.type == "window":
         extract_window_features(
-            args.input_path, args.output_path, args.window, args.stride
+            args.input_path, args.output_path, args.window, args.stride, args.i24
         )
     else:
-        extract_trajectory_features(args.input_path, args.output_path, args.points)
+        extract_trajectory_features(
+            args.input_path, args.output_path, args.points, args.i24
+        )
 
 
 if __name__ == "__main__":

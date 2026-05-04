@@ -4,3 +4,4 @@ data/*.pkl
 data/*.json
 data/*.csv
 data/*.cpkl
+data/*.zip
