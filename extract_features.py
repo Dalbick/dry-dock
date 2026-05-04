@@ -103,7 +103,7 @@ def extract_window_features(input_path, output_path, window, stride):
     df.to_csv(output_path, index=False)
 
 
-def extract_trajectory_features(input_path, output_path):
+def extract_trajectory_features(input_path, output_path, points):
     with open(input_path, "rb") as f:
         raw_data = json.load(f)
     preserved_fields = [
@@ -117,7 +117,7 @@ def extract_trajectory_features(input_path, output_path):
     ]
     res = []
     for obj in tqdm(raw_data):
-        data = process_trajectory(obj)
+        data = process_trajectory(obj, points)
         data |= {field: obj[field] for field in preserved_fields}
         res.append(data)
     df = pd.DataFrame(res)
@@ -128,7 +128,7 @@ VEL_THRESHOLD = 0.5
 ACC_THRESHOLD = 1.0
 
 
-def process_trajectory(data):
+def process_trajectory(data, points):
     res = {}
     t = np.array(data["ts"])
     vel_x = np.array(data["vel_x"])
@@ -182,7 +182,28 @@ def process_trajectory(data):
     res["frac_stop"] = np.sum(t_deltas[vel[1:] <= VEL_THRESHOLD]) / res["delta_t"]
     res["frac_accel"] = np.sum(t_deltas[acc_dir > ACC_THRESHOLD]) / res["delta_t"]
     res["frac_break"] = np.sum(t_deltas[acc_dir < -ACC_THRESHOLD]) / res["delta_t"]
+    t_x, t_y = timestamp_encoding(t, x, y, points)
+    for i in range(points):
+        res[f"x_{i}"] = t_x[i] - x[0]
+        res[f"y_{i}"] = t_y[i] - y[0]
     return res
+
+
+def timestamp_encoding(t, x, y, n):
+    j = 0
+    t_x = []
+    t_y = []
+    for i in range(n):
+        target = t[0] + i * (t[-1] - t[0]) / (n - 1)
+        j = j + np.argmax(t[j:] >= target)
+        if j == 0:
+            t_x.append(x[0])
+            t_y.append(y[0])
+        else:
+            coeff = (target - t[j - 1]) / (t[j] - t[j - 1])
+            t_x.append(x[j - 1] * (1 - coeff) + x[j] * coeff)
+            t_y.append(y[j - 1] * (1 - coeff) + y[j] * coeff)
+    return t_x, t_y
 
 
 def main():
@@ -192,6 +213,7 @@ def main():
     parser.add_argument("--type", "-t", choices=["window", "trajectory"], required=True)
     parser.add_argument("--window", "-w", type=int, default=20)
     parser.add_argument("--stride", "-s", type=int, default=10)
+    parser.add_argument("--points", "-p", type=int, default=0)
 
     args = parser.parse_args()
     if args.type == "window":
@@ -199,7 +221,7 @@ def main():
             args.input_path, args.output_path, args.window, args.stride
         )
     else:
-        extract_trajectory_features(args.input_path, args.output_path)
+        extract_trajectory_features(args.input_path, args.output_path, args.points)
 
 
 if __name__ == "__main__":
