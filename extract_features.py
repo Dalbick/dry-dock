@@ -2,9 +2,10 @@ import numpy as np
 import pandas as pd
 import json
 import argparse
+from tqdm import tqdm
 
 
-def extract_features(input_path, output_path, window, stride):
+def extract_window_features(input_path, output_path, window, stride):
     with open(input_path, "rb") as f:
         raw_data = json.load(f)
     fields = [
@@ -102,15 +103,103 @@ def extract_features(input_path, output_path, window, stride):
     df.to_csv(output_path, index=False)
 
 
+def extract_trajectory_features(input_path, output_path):
+    with open(input_path, "rb") as f:
+        raw_data = json.load(f)
+    preserved_fields = [
+        "object_id",
+        "intersection_id",
+        "classification",
+        "sub_classification",
+        "obj_length",
+        "obj_width",
+        "obj_height",
+    ]
+    res = []
+    for obj in tqdm(raw_data):
+        data = process_trajectory(obj)
+        data |= {field: obj[field] for field in preserved_fields}
+        res.append(data)
+    df = pd.DataFrame(res)
+    df.to_csv(output_path, index=False)
+
+
+VEL_THRESHOLD = 0.5
+ACC_THRESHOLD = 1.0
+
+
+def process_trajectory(data):
+    res = {}
+    t = np.array(data["ts"])
+    vel_x = np.array(data["vel_x"])
+    vel_y = np.array(data["vel_y"])
+    vel = np.sqrt(np.square(vel_x) + np.square(vel_y))
+    res["vel_min"] = np.min(vel)
+    res["vel_max"] = np.max(vel)
+    res["vel_mean"] = np.mean(vel)
+    res["vel_std"] = np.std(vel)
+    t_deltas = np.diff(t)
+    acc_x = np.diff(vel_x) / t_deltas
+    acc_y = np.diff(vel_y) / t_deltas
+    acc = np.sqrt(np.square(acc_x) + np.square(acc_y))
+    res["acc_min"] = np.min(acc)
+    res["acc_max"] = np.max(acc)
+    res["acc_mean"] = np.mean(acc)
+    res["acc_std"] = np.std(acc)
+    jerk_x = np.diff(acc_x) / t_deltas[1:]
+    jerk_y = np.diff(acc_y) / t_deltas[1:]
+    jerk = np.sqrt(np.square(jerk_x) + np.square(jerk_y))
+    res["jerk_min"] = np.min(jerk)
+    res["jerk_max"] = np.max(jerk)
+    res["jerk_mean"] = np.mean(jerk)
+    res["jerk_std"] = np.std(jerk)
+    acc_dir = np.diff(vel) / t_deltas
+    res["acc_dir_min"] = np.min(acc_dir)
+    res["acc_dir_max"] = np.max(acc_dir)
+    res["acc_dir_mean"] = np.mean(acc_dir)
+    res["acc_dir_std"] = np.std(acc_dir)
+    jerk_dir = np.diff(acc_dir) / t_deltas[1:]
+    res["jerk_dir_min"] = np.min(jerk_dir)
+    res["jerk_dir_max"] = np.max(jerk_dir)
+    res["jerk_dir_mean"] = np.mean(jerk_dir)
+    res["jerk_dir_std"] = np.std(jerk_dir)
+    curv = (np.abs(vel_x[1:] * acc_y - vel_y[1:] * acc_x) / np.pow(vel[1:], 3))[
+        vel[1:] > VEL_THRESHOLD
+    ]
+    res["curv_min"] = np.min(curv) if len(curv) else np.nan
+    res["curv_max"] = np.max(curv) if len(curv) else np.nan
+    res["curv_mean"] = np.mean(curv) if len(curv) else np.nan
+    res["curv_std"] = np.std(curv) if len(curv) else np.nan
+    x = np.array(data["obj_x"])
+    y = np.array(data["obj_y"])
+    x_deltas = np.diff(x)
+    y_deltas = np.diff(y)
+    path_deltas = np.sqrt(np.square(x_deltas) + np.square(y_deltas))
+    res["delta_x"] = x[-1] - x[0]
+    res["delta_y"] = y[-1] - y[0]
+    res["path"] = np.sum(path_deltas)
+    res["delta_t"] = t[-1] - t[0]
+    res["frac_stop"] = np.sum(t_deltas[vel[1:] <= VEL_THRESHOLD]) / res["delta_t"]
+    res["frac_accel"] = np.sum(t_deltas[acc_dir > ACC_THRESHOLD]) / res["delta_t"]
+    res["frac_break"] = np.sum(t_deltas[acc_dir < -ACC_THRESHOLD]) / res["delta_t"]
+    return res
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input_path")
     parser.add_argument("output_path")
+    parser.add_argument("--type", "-t", choices=["window", "trajectory"], required=True)
     parser.add_argument("--window", "-w", type=int, default=20)
     parser.add_argument("--stride", "-s", type=int, default=10)
 
     args = parser.parse_args()
-    extract_features(args.input_path, args.output_path, args.window, args.stride)
+    if args.type == "window":
+        extract_window_features(
+            args.input_path, args.output_path, args.window, args.stride
+        )
+    else:
+        extract_trajectory_features(args.input_path, args.output_path)
 
 
 if __name__ == "__main__":
