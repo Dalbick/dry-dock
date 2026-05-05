@@ -1,0 +1,14 @@
+# gitignore
+.DS_Store
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints
+test.ipynb
+# Ignore Python cache files
+__pycache__/
+*.pyc
+# Ignore plots
+*.png
+*.pdf
+# Ignore dataset files
+*.json
+real_datasets/data_cache/*
