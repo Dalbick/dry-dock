@@ -5,3 +5,13 @@ data/*.json
 data/*.csv
 data/*.cpkl
 data/*.zip
+
+# Large data files
+ships_data/
+i24/
+*.parquet
+*.csv
+*.json
+*.pkl
+*.cpkl
+*.zip
